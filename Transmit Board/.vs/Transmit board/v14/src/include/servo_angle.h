@@ -1,14 +1,11 @@
 #ifndef SERVO_ANGLE_H
 #define SERVO_ANGLE_H
 
-#define F_CPU 16000000UL
-#include <util/delay.h>
 #include <avr/io.h>
-#include <stdio.h>
 
-void servo_init();
-void servo_loop();
+extern volatile int16_t angle;
 
-extern volatile int angle;
+void timer1_init(void);
+void servo_set_angle(uint8_t a);
 
 #endif

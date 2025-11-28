@@ -1,21 +1,19 @@
 #ifndef SENSOR_MLX_H
 #define SENSOR_MLX_H
 
-#include <avr/io.h> 
-#include <stdio.h>
-#define slave_address 0x5A
-#define reg 0x07
-#define F_CPU 16000000UL
+#include <avr/io.h>
+#include <stdint.h>
 
 void i2c_init(void);
 void i2c_start(void);
 void i2c_stop(void);
-void i2c_write(unsigned char data);
-unsigned char i2c_read_ack(void);
-unsigned char i2c_read_nack(void);
-unsigned short mlx_16bit(reg);
-float temp_f(unsigned short data);
+void i2c_write(uint8_t data);
+uint8_t i2c_read_ack(void);
+uint8_t i2c_read_nack(void);
 
-extern volatile float temp;
+int mlx_read16(uint8_t reg, uint16_t *out);
+float mlx_temp_c(uint16_t raw);
+float mlx_temp_f(uint16_t raw);
+uint8_t crc8(uint8_t *data, uint8_t len);
 
-#endif 
+#endif

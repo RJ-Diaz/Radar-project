@@ -1,61 +1,46 @@
-#define F_CPU 16000000UL
-#define echo
-#define trig
-#include <avr/io.h>
-#include <stdio.h>
+#include "sensor_sr.h"
 #include <util/delay.h>
+#include <avr/interrupt.h>
 
-void hc_sr04_init() 
-{ 
-    DDRD |= (1 << trig);   // TRIG as output 
-    DDRD &= ~(1 << echo);  // ECHO as input 
-} 
+volatile uint16_t echo_start = 0;
+volatile uint16_t echo_end = 0;
+volatile uint8_t echo_ready = 0;
 
-volatile float distance = 0;
+void hc_sr04_init(void) {
+	DDRD |= (1 << PD4);   // TRIG out
+	DDRB &= ~(1 << PB0);  // ECHO in
 
-float hc_sr04_read() 
-{ 
-    TIFR0 |= (1<<TOV0);
+	PCICR  |= (1 << PCIE0);     // enable PCINT0..7 group
+	PCMSK0 |= (1 << PCINT0);    // enable PB0 specifically
+}
 
-    PORTD &= ~(1 << trig); 
-    _delay_us(2); // sets trigger to low before starting
-    
-    PORTD |= (1 << trig); 
-    _delay_us(10); // sends a 10us high pulse to tell the sensor to start measurement
+void hc_sr04_trigger(void) {
+	PORTD &= ~(1 << PD4);
+	_delay_us(2);
+	PORTD |= (1 << PD4);
+	_delay_us(10);
+	PORTD &= ~(1 << PD4);
+}
 
-    PORTD &= ~(1 << trig); 
+ISR(PCINT0_vect) {
+	static uint8_t last = 0;
+	uint8_t now = (PINB & (1 << PB0)) ? 1 : 0;
 
+	if (now && !last) {
+		echo_start = TCNT1;   // rising edge
+		} else if (!now && last) {
+		echo_end = TCNT1;     // falling edge
+		echo_ready = 1;
+	}
+	last = now;
+}
 
-    // Wait for echo HIGH 
-    TCNT0 = 0; 
-    TCCR0B = (1 << CS02) | (1<<CS00); // Start timer (prescaler 1024) 
-
-    while (!(PIND & (1 << echo)))        // Wait for echo LOW 
-    {
-
-        if (TIFR0 & (1<<TOV0)){
-        TCCR0B = 0;
-        return -1;
-        }
-    }
-
-    TCNT0 = 0;
-    TIFR0 |= (1<<TOV0);
-
-    while((PIND & (1<<echo)))
-    {
-        if (TIFR0 & (1<<TOV0))
-        {
-            TCCR0B = 0;
-            return -1;
-        }
-    }
-
-    TCCR0B = 0;
-
-    distance = (TCNT0 * 1.0976);
-    return distance; // Convert to cm 
-} 
-
-
- 
+int hc_sr04_get_distance(void) {
+	uint16_t start = echo_start;
+	uint16_t end   = echo_end;
+	uint16_t ticks = (end >= start) ? (end - start) : (end + (ICR1 - start));
+	uint32_t pulse_us = ticks / 2; // prescaler=8 → 0.5 µs per tick
+	int dis_cm = pulse_us / 58;
+	if (dis_cm < 2 || dis_cm > 400) return -2;
+	return dis_cm;
+}

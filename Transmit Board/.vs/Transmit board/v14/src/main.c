@@ -1,48 +1,49 @@
-#include <sensor_mlx.h>
-#include <sensor_sr.h>
-#include <servo_angle.h>
-#include <uart_tx.h>
-#include <stdio.h>
-#include <util/delay.h>
 #define F_CPU 16000000UL
+#include <avr/io.h>
+#include <util/delay.h>
+#include <avr/interrupt.h>
+#include <stdio.h>
 
+#include "servo_angle.h"   // contains timer1_init()
+#include "sensor_sr.h"     // ultrasonic init + trigger
+#include "sensor_mlx.h"    // MLX90614 read functions
+#include "uart_tx.h"       // UART init + send
 
-volatile char buffer[32];
+int main(void) {
+	// --- Init hardware ---
+	hc_sr04_init();
+	i2c_init();
+	timer1_init();
+	uart_init();
+	sei(); // enable global interrupts
 
-int main()
-{
-    i2c_init();
-    hc_sr04_init();
-    servo_init();
-    uart_init();
+	int temp_c = 0;
+	uint16_t raw = 0;
+	uint8_t mlx_counter = 0;
+	char pkt[48];
 
-    while(1)
-    {
-        servo_loop();
-        hc_sr04_read();
-        
-        i2c_start();
-        i2c_write((slave_address << 1) | 0);
-        i2c_write(reg);
-        i2c_start();
-        i2c_write((slave_address << 1) | 1);
+	while (1) {
+		// Trigger ultrasonic every ~50 ms
+		hc_sr04_trigger();
+		_delay_ms(50);
 
-        unsigned char low = i2c_read_ack();
-        unsigned char high = i2c_read_nack();
+		// Pace MLX reads (every ~250 ms)
+		if (++mlx_counter >= 5) {
+			mlx_counter = 0;
+			if (mlx_read16(0x07, &raw) == 0) {
+				temp_c = (int)mlx_temp_c(raw);
+			}
+		}
 
-        i2c_stop();
+		// Only update distance when echo is ready
+		int distance_cm = -1;
+		if (echo_ready) {
+			echo_ready = 0;
+			distance_cm = hc_sr04_get_distance();
+		}
 
-        unsigned short raw = (high << 8) | low;
-
-        temp_f(raw);
-
-        sprintf(buffer, "%dm\n%dg\n%.2fF\n\r\n", distance, angle, temp);
-        
-        for(int i=0; buffer[i] != '\0'; i++)
-        {
-            uart_send(buffer[i]);
-        }
-
-    }
-
+		// Build packet with current angle (from ISR), distance, and temp
+		snprintf(pkt, sizeof(pkt), "%dg,%dc,%dC\n", angle, distance_cm, temp_c);
+		uart_send(pkt);
+	}
 }
